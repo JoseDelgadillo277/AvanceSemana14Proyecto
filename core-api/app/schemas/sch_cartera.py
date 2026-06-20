@@ -4,9 +4,11 @@ from typing import Optional
 class CarteraItemOut(BaseModel):
     id: str
     cliente_id: str
+    solicitud_id: Optional[str] = None
     cliente_nombre: str
     documento: str
     numero_expediente: Optional[str] = None
+    estado_solicitud: Optional[str] = None
     tipo_gestion: str
     prioridad: str
     score_prioridad: int

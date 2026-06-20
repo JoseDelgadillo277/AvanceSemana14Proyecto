@@ -35,7 +35,7 @@ def listar_por_asesor(db: Session, asesor_id: str, fecha: date) -> list[dict]:
     for c, cli in filas:
         solicitud = db.execute(
             text(
-                """SELECT numero_expediente, created_at
+                """SELECT id, numero_expediente, estado, created_at
                    FROM solicitudes_credito
                    WHERE cliente_id = :cliente_id
                    ORDER BY created_at DESC
@@ -43,18 +43,24 @@ def listar_por_asesor(db: Session, asesor_id: str, fecha: date) -> list[dict]:
             ),
             {"cliente_id": str(c.cliente_id)},
         ).mappings().first()
+        estado_solicitud = solicitud["estado"] if solicitud else None
+        estado_visita = c.estado_visita
+        if estado_solicitud == "enviado":
+            estado_visita = "pendiente"
         resultado.append(
             {
             "id": str(c.id),
             "cliente_id": str(c.cliente_id),
+            "solicitud_id": str(solicitud["id"]) if solicitud else None,
             "cliente_nombre": f"{cli.nombres} {cli.apellidos}",
             "documento": cli.numero_documento,
             "numero_expediente": solicitud["numero_expediente"] if solicitud else None,
+            "estado_solicitud": estado_solicitud,
             "tipo_gestion": c.tipo_gestion,
             "prioridad": c.prioridad,
             "score_prioridad": c.score_prioridad or 0,
             "monto_credito": float(c.monto_credito or 0),
-            "estado_visita": c.estado_visita,
+            "estado_visita": estado_visita,
             "orden_manual": c.orden_manual,
             "fecha_asignacion": c.fecha_asignacion.isoformat() if c.fecha_asignacion else None,
             "fecha_hora_solicitud": solicitud["created_at"].isoformat() if solicitud and solicitud["created_at"] else None,

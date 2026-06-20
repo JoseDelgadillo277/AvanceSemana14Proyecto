@@ -22,6 +22,65 @@ def get_cliente(db: Session, cliente_id: str) -> Cliente | None:
     return db.query(Cliente).filter(Cliente.id == cliente_id).first()
 
 
+def registrar_cliente(db: Session, data: dict) -> Cliente:
+    numero_documento = str(data.get("numero_documento", "")).strip()
+    if get_usuario_by_username(db, numero_documento):
+        raise ValueError("Ya existe una cuenta con este DNI")
+
+    existente = db.execute(
+        text("SELECT * FROM clientes WHERE numero_documento = :doc"),
+        {"doc": numero_documento},
+    ).mappings().first()
+
+    if existente:
+        cliente_id = str(existente["id"])
+    else:
+        cliente_id = str(uuid.uuid4())
+        db.execute(
+            text(
+                """INSERT INTO clientes
+                     (id, cod_cliente, numero_documento, tipo_documento,
+                      nombres, apellidos, telefono, email, direccion,
+                      tipo_negocio, nombre_negocio, ingresos_estimados,
+                      calificacion_sbs, es_prospecto)
+                   VALUES
+                     (:id, :cod, :doc, 'DNI', :nombres, :apellidos,
+                      :telefono, :email, 'Direccion registrada desde App Clientes',
+                      'Bodega', :negocio, 2500.00, 'Normal', TRUE)"""
+            ),
+            {
+                "id": cliente_id,
+                "cod": f"CLI-{numero_documento[-4:]}",
+                "doc": numero_documento,
+                "nombres": data.get("nombres") or "Cliente",
+                "apellidos": data.get("apellidos") or "Banco Falabella",
+                "telefono": data.get("telefono"),
+                "email": data.get("email") or f"{numero_documento}@cliente.falabella.pe",
+                "negocio": f"Negocio {numero_documento[-4:]}",
+            },
+        )
+
+    db.execute(
+        text(
+            """INSERT INTO usuarios_cliente (id, cliente_id, username, password_hash, activo)
+               VALUES (:id, :cliente_id, :username, :password_hash, TRUE)"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cliente_id": cliente_id,
+            "username": numero_documento,
+            "password_hash": hash_password(data.get("password") or "12345"),
+        },
+    )
+    cliente = db.execute(
+        text("SELECT * FROM clientes WHERE id = :id"),
+        {"id": cliente_id},
+    ).mappings().first()
+    _materializar_productos_demo(db, cliente)
+    db.commit()
+    return get_cliente(db, cliente_id)
+
+
 def cuentas_ahorro(db: Session, cliente_id: str) -> list[CrCuentaAhorro]:
     return db.query(CrCuentaAhorro).filter(
         CrCuentaAhorro.cliente_id == cliente_id
@@ -130,6 +189,15 @@ def resumen_demo_por_documento(db: Session, numero_documento: str) -> dict | Non
     }
 
 
+def materializar_productos_por_cliente_id(db: Session, cliente_id: str) -> None:
+    cliente = db.execute(
+        text("SELECT * FROM clientes WHERE id = :id"),
+        {"id": cliente_id},
+    ).mappings().first()
+    if cliente:
+        _materializar_productos_demo(db, cliente)
+
+
 def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
     """Crea la credencial demo de App Clientes si aun no existe."""
     cliente = db.execute(
@@ -146,8 +214,8 @@ def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
                       tipo_negocio, nombre_negocio, ingresos_estimados,
                       calificacion_sbs, es_prospecto)
                    VALUES
-                     (:id, :cod, :doc, 'DNI', 'Jose', 'Demo Falabella',
-                      '999888777', :email, 'Direccion demo Banco Falabella',
+                     (:id, :cod, :doc, 'DNI', 'Jose', 'Delgadillo',
+                      '999888777', :email, 'Direccion registrada Banco Falabella',
                       'Bodega', 'Bodega Demo Falabella', 3200.00,
                       'Normal', TRUE)"""
             ),
@@ -249,6 +317,7 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
             "pago": date.today().replace(day=28),
         },
     )
+    _materializar_movimientos_servicios(db, cliente_id, cuenta, doc)
 
     solicitudes = db.execute(
         text(
@@ -352,6 +421,48 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
             },
         )
     db.commit()
+
+
+def _materializar_movimientos_servicios(
+    db: Session,
+    cliente_id: str,
+    cuenta: str,
+    doc: str,
+) -> None:
+    servicios = [
+        {
+            "codigo": f"OP-SERV-LUZ-{doc}",
+            "concepto": "Pago servicio de luz",
+            "monto": 86.40,
+            "fecha": datetime.now(timezone.utc) - timedelta(days=1),
+        },
+        {
+            "codigo": f"OP-SERV-AGUA-{doc}",
+            "concepto": "Pago servicio de agua",
+            "monto": 42.70,
+            "fecha": datetime.now(timezone.utc) - timedelta(days=2),
+        },
+    ]
+    for item in servicios:
+        db.execute(
+            text(
+                """INSERT INTO cr_movimientos
+                     (id, cod_operacion, cliente_id, cod_cuenta, tipo, concepto,
+                      canal, monto, moneda, fecha_operacion)
+                   VALUES (:id, :codop, :cliente_id, :cuenta, 'DEB',
+                           :concepto, 'APP', :monto, 'PEN', :fecha)
+                   ON CONFLICT (cod_operacion) DO NOTHING"""
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "codop": item["codigo"],
+                "cliente_id": cliente_id,
+                "cuenta": cuenta,
+                "concepto": item["concepto"],
+                "monto": item["monto"],
+                "fecha": item["fecha"],
+            },
+        )
 
 
 def json_payload(numero_expediente: str) -> str:

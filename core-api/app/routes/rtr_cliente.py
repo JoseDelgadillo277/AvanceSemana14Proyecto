@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from app.core.cfg_database import get_db
 from app.core.cfg_auth import get_current_cliente
 from app.schemas.sch_cliente import (
-    LoginClienteIn, TokenClienteOut, ClienteOut, CuentaAhorroOut, CreditoOut,
-    CuotaOut, MovimientoOut, TarjetaOut, NotificacionOut, OperacionIn, OperacionOut,
+    LoginClienteIn, RegistroClienteIn, TokenClienteOut, ClienteOut,
+    CuentaAhorroOut, CreditoOut, CuotaOut, MovimientoOut, TarjetaOut,
+    NotificacionOut, OperacionIn, OperacionOut,
 )
 from app.schemas.sch_solicitudes import SolicitudIn, SolicitudCreada, SolicitudResumen
 from app.controllers import ctl_auth_cliente
@@ -29,6 +30,19 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return result
+
+
+@router.post("/registro", response_model=ClienteOut)
+def registro(data: RegistroClienteIn, db: Session = Depends(get_db)):
+    """Crea la cuenta propia del cliente para acceder a la App Clientes."""
+    if len(data.numero_documento.strip()) != 8 or not data.numero_documento.isdigit():
+        raise HTTPException(status_code=400, detail="DNI invalido")
+    if len(data.password) < 5:
+        raise HTTPException(status_code=400, detail="La clave debe tener minimo 5 caracteres")
+    try:
+        return rep_cliente.registrar_cliente(db, data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/perfil", response_model=ClienteOut)

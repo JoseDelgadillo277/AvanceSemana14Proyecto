@@ -4,6 +4,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.data.casos_credito import casos_completos
+from app.core.cfg_security import hash_password
 
 
 def listar() -> list[dict]:
@@ -205,6 +206,7 @@ def _upsert_cliente(db: Session, caso: dict) -> str:
                 "sbs": caso["calificacion_sbs"],
             },
         )
+        _asegurar_usuario_cliente(db, cliente_id, caso["numero_documento"])
         return cliente_id
 
     cliente_id = str(uuid.uuid4())
@@ -233,7 +235,47 @@ def _upsert_cliente(db: Session, caso: dict) -> str:
             "sbs": caso["calificacion_sbs"],
         },
     )
+    _asegurar_usuario_cliente(db, cliente_id, caso["numero_documento"])
     return cliente_id
+
+
+def asegurar_usuarios_clientes(db: Session) -> dict:
+    creados = 0
+    existentes = 0
+    for caso in casos_completos():
+        cliente_id = _upsert_cliente(db, caso)
+        row = db.execute(
+            text("SELECT id FROM usuarios_cliente WHERE username = :dni"),
+            {"dni": caso["numero_documento"]},
+        ).first()
+        if row:
+            existentes += 1
+        else:
+            _asegurar_usuario_cliente(db, cliente_id, caso["numero_documento"])
+            creados += 1
+    db.commit()
+    return {"ok": True, "creados": creados, "existentes": existentes, "clave": "12345"}
+
+
+def _asegurar_usuario_cliente(db: Session, cliente_id: str, dni: str) -> None:
+    db.execute(
+        text(
+            """INSERT INTO usuarios_cliente (id, cliente_id, username, password_hash, activo)
+               VALUES (:id, :cliente_id, :username, :password_hash, TRUE)
+               ON CONFLICT (username) DO UPDATE SET
+                 cliente_id = EXCLUDED.cliente_id,
+                 password_hash = EXCLUDED.password_hash,
+                 activo = TRUE,
+                 bloqueado = FALSE,
+                 intentos_fallidos = 0"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cliente_id": cliente_id,
+            "username": dni,
+            "password_hash": hash_password("12345"),
+        },
+    )
 
 
 def _score_prioridad(caso: dict) -> int:

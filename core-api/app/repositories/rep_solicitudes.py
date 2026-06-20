@@ -3,6 +3,7 @@ import uuid
 from datetime import date, datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.repositories import rep_cliente
 
 
 def _upsert_cliente(db: Session, d: dict) -> str:
@@ -347,7 +348,7 @@ def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
 def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dict | None:
     row = db.execute(
         text(
-            """SELECT id, numero_expediente, estado, monto_aprobado
+            """SELECT id, numero_expediente, estado, monto_aprobado, cliente_id
                FROM solicitudes_credito
                WHERE id = :id"""
         ),
@@ -373,6 +374,7 @@ def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dic
         "monto_desembolsado": float(row["monto_aprobado"] or 0),
         "observacion": (data or {}).get("observacion"),
     })
+    rep_cliente.materializar_productos_por_cliente_id(db, str(row["cliente_id"]))
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": "desembolsado"}
 

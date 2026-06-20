@@ -552,12 +552,14 @@ class ScoringRepository {
       final rows = await _getCoreList('/cartera/demo');
       if (rows.isEmpty) return null;
       final requests = await _optionalList(_getCoreList('/solicitudes/demo'));
-      final history = await _optionalList(_getCoreList('/cartera/demo/historial'));
+      final history = await _optionalList(
+        _getCoreList('/cartera/demo/historial'),
+      );
       final portfolio = rows.map(_clientFromCoreCartera).toList()
         ..sort((a, b) {
-          final statusCompare = _visitOrder(a.visitStatus).compareTo(
-            _visitOrder(b.visitStatus),
-          );
+          final statusCompare = _visitOrder(
+            a.visitStatus,
+          ).compareTo(_visitOrder(b.visitStatus));
           if (statusCompare != 0) return statusCompare;
           return b.priorityScore.compareTo(a.priorityScore);
         });
@@ -584,26 +586,26 @@ class ScoringRepository {
         history: history,
         requests: requests.isEmpty
             ? portfolio
-                .map(
-                  (client) => {
-                    'numero_expediente': _text(
-                      client.credit,
-                      'numero_expediente',
-                      fallback: client.id,
-                    ),
-                    'cliente_nombre': client.fullName,
-                    'estado': client.status,
-                    'monto_solicitado': client.hypothesisAmount,
-                    'monto_aprobado': client.approvedAmount,
-                    'plazo_meses': _number(
-                      client.credit,
-                      'plazo_meses',
-                      fallback: 12,
-                    ),
-                    'created_at': DateTime.now().toIso8601String(),
-                  },
-                )
-                .toList()
+                  .map(
+                    (client) => {
+                      'numero_expediente': _text(
+                        client.credit,
+                        'numero_expediente',
+                        fallback: client.id,
+                      ),
+                      'cliente_nombre': client.fullName,
+                      'estado': client.status,
+                      'monto_solicitado': client.hypothesisAmount,
+                      'monto_aprobado': client.approvedAmount,
+                      'plazo_meses': _number(
+                        client.credit,
+                        'plazo_meses',
+                        fallback: 12,
+                      ),
+                      'created_at': DateTime.now().toIso8601String(),
+                    },
+                  )
+                  .toList()
             : requests,
         bureau: const [],
         alerts: const [],
@@ -629,6 +631,7 @@ class ScoringRepository {
     final amount = _number(row, 'monto_credito');
     final priorityScore = _number(row, 'score_prioridad', fallback: 40);
     final visitStatus = _visitStatus(row);
+    final requestStatus = _text(row, 'estado_solicitud', fallback: 'enviado');
     final segment = amount >= 8000
         ? 'PREMIER'
         : (amount >= 3000 ? 'ESTANDAR' : 'BASICO');
@@ -650,9 +653,9 @@ class ScoringRepository {
         'monto_aprobado': amount,
         'plazo_meses': 12,
         'cuota_mensual': amount * paymentFactor(0.4392, 12),
-        'estado': 'enviado',
         'fecha_preaprobacion': DateTime.now().toIso8601String(),
         'dias_mora': 0,
+        'estado': requestStatus,
         'estado_pago': 'al_dia',
       },
       profile: {
@@ -687,11 +690,8 @@ class ScoringRepository {
         'id': _text(row, 'id'),
         'source': 'core',
         'cliente_user_id': clienteId,
-        'tipo_gestion': _text(
-          row,
-          'tipo_gestion',
-          fallback: 'NUEVA_SOLICITUD',
-        ),
+        'solicitud_id': _text(row, 'solicitud_id'),
+        'tipo_gestion': _text(row, 'tipo_gestion', fallback: 'NUEVA_SOLICITUD'),
         'prioridad': _text(row, 'prioridad', fallback: 'normal'),
         'score_prioridad': priorityScore,
         'estado_visita': visitStatus,
@@ -710,26 +710,21 @@ class ScoringRepository {
     if (_text(client.assignment, 'source') == 'core') {
       final assignmentId = _text(client.assignment, 'id');
       if (assignmentId.isEmpty) return;
-      await _postCore(
-        '/cartera/demo/$assignmentId/comite',
-        {
-          'asesor_nombre': advisorName,
-          'agencia': agency,
-          'score_transaccional': client.scoreValue.toInt(),
-          'score_campo': result.scoreCampo,
-          'score_final': result.scoreFinal,
-          'segmento': result.segment,
-          'monto_propuesto': result.disqualified
-              ? 0
-              : min(input.montoPropuesto.toDouble(), result.maxAmount),
-          'plazo_meses': input.plazoMeses,
-          'cuota_estimada': result.payment,
-          'recomendacion': result.disqualified
-              ? 'rechazar'
-              : input.recomendacion,
-          'observaciones': input.observaciones,
-        },
-      );
+      await _postCore('/cartera/demo/$assignmentId/comite', {
+        'asesor_nombre': advisorName,
+        'agencia': agency,
+        'score_transaccional': client.scoreValue.toInt(),
+        'score_campo': result.scoreCampo,
+        'score_final': result.scoreFinal,
+        'segmento': result.segment,
+        'monto_propuesto': result.disqualified
+            ? 0
+            : min(input.montoPropuesto.toDouble(), result.maxAmount),
+        'plazo_meses': input.plazoMeses,
+        'cuota_estimada': result.payment,
+        'recomendacion': result.disqualified ? 'rechazar' : input.recomendacion,
+        'observaciones': input.observaciones,
+      });
       return;
     }
 
@@ -839,15 +834,12 @@ class ScoringRepository {
     if (_text(client.assignment, 'source') == 'core') {
       final assignmentId = _text(client.assignment, 'id');
       if (assignmentId.isEmpty) return;
-      await _postCore(
-        '/cartera/demo/$assignmentId/visita',
-        {
-          'resultado': result,
-          'observacion': observation,
-          'lat': client.lat,
-          'lng': client.lng,
-        },
-      );
+      await _postCore('/cartera/demo/$assignmentId/visita', {
+        'resultado': result,
+        'observacion': observation,
+        'lat': client.lat,
+        'lng': client.lng,
+      });
       return;
     }
 
@@ -1038,12 +1030,12 @@ class ScoringRepository {
     final uri = Uri.parse('$baseUrl$path');
     final response = method == 'POST'
         ? await http
-            .post(
-              uri,
-              headers: const {'Content-Type': 'application/json'},
-              body: jsonEncode(body ?? const <String, dynamic>{}),
-            )
-            .timeout(const Duration(seconds: 8))
+              .post(
+                uri,
+                headers: const {'Content-Type': 'application/json'},
+                body: jsonEncode(body ?? const <String, dynamic>{}),
+              )
+              .timeout(const Duration(seconds: 8))
         : await http.get(uri).timeout(const Duration(seconds: 8));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('Core ${response.statusCode}: ${response.body}');
@@ -1353,9 +1345,11 @@ String _text(Map<String, dynamic> map, String key, {String fallback = ''}) {
 }
 
 String _visitStatus(Map<String, dynamic> row) {
-  final raw = _text(row, 'estado_visita', fallback: 'pendiente')
-      .toLowerCase()
-      .replaceAll(' ', '_');
+  final raw = _text(
+    row,
+    'estado_visita',
+    fallback: 'pendiente',
+  ).toLowerCase().replaceAll(' ', '_');
   if (raw.contains('pend')) return 'pendiente';
   if (raw.contains('visit')) return 'visitado';
   return raw.isEmpty ? 'pendiente' : raw;

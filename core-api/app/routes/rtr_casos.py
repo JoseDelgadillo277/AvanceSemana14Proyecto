@@ -38,3 +38,9 @@ def conexion(db: Session = Depends(get_db)):
 def sembrar_casos(db: Session = Depends(get_db)):
     """Crea los 30 expedientes del flujo movil en la BD."""
     return rep_casos.sembrar(db)
+
+
+@router.post("/usuarios-clientes")
+def usuarios_clientes_casos(db: Session = Depends(get_db)):
+    """Asegura acceso DNI / 12345 para los 30 clientes del PDF."""
+    return rep_casos.asegurar_usuarios_clientes(db)

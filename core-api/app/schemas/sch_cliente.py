@@ -10,6 +10,15 @@ class LoginClienteIn(BaseModel):
     password: str
 
 
+class RegistroClienteIn(BaseModel):
+    numero_documento: str
+    password: str
+    nombres: str
+    apellidos: str
+    email: str | None = None
+    telefono: str | None = None
+
+
 class ClienteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID

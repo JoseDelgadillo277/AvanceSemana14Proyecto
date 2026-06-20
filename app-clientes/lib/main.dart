@@ -73,6 +73,11 @@ final demoProfile = UserProfile(
   document: 'DNI 76543210',
   address: 'Av. La Marina 1250, San Miguel',
   customerSince: 'Cliente desde 2024',
+  firstNames: 'Jose',
+  lastNames: 'Delgadillo',
+  businessType: 'Bodega',
+  businessName: 'Bodega Demo Falabella',
+  monthlyIncome: 3200,
 );
 
 final demoProducts = BankProducts(
@@ -122,6 +127,11 @@ class UserProfile {
     required this.document,
     required this.address,
     required this.customerSince,
+    required this.firstNames,
+    required this.lastNames,
+    required this.businessType,
+    required this.businessName,
+    required this.monthlyIncome,
   });
 
   final String name;
@@ -130,6 +140,11 @@ class UserProfile {
   final String document;
   final String address;
   final String customerSince;
+  final String firstNames;
+  final String lastNames;
+  final String businessType;
+  final String businessName;
+  final double monthlyIncome;
 
   factory UserProfile.fromCoreSummary(Map<String, dynamic> json) {
     final cliente = _asMap(json['cliente']);
@@ -145,6 +160,11 @@ class UserProfile {
       document: 'DNI $dni',
       address: _text(cliente['direccion'], 'Direccion registrada en Core'),
       customerSince: 'Cliente Core desde 2026',
+      firstNames: _text(cliente['nombres'], 'Cliente'),
+      lastNames: _text(cliente['apellidos'], 'Banco Falabella'),
+      businessType: _titleCase(_text(cliente['tipo_negocio'], 'Bodega')),
+      businessName: _text(cliente['nombre_negocio'], 'Negocio del cliente'),
+      monthlyIncome: _jsonDouble(cliente['ingresos_estimados']),
     );
   }
 }
@@ -176,16 +196,18 @@ class BankProducts {
     );
 
     final monthlyDeposits = movimientos
-        .where((item) => _text(item['tipo_movimiento'], '').toUpperCase() == 'CRE')
+        .where((item) => _movementType(item) == 'CRE')
         .fold<double>(0, (sum, item) => sum + _jsonDouble(item['monto']));
 
     return BankProducts(
       savings: SavingsAccount(
         name: _text(cuenta['tipo_cuenta'], 'Cuenta Ahorro Digital'),
         number: _text(cuenta['cod_cuenta_ahorro'], demoProducts.savings.number),
-        balance: _jsonDouble(cuenta['saldo_capital']) +
+        balance:
+            _jsonDouble(cuenta['saldo_capital']) +
             _jsonDouble(cuenta['saldo_interes']),
-        availableBalance: _jsonDouble(cuenta['saldo_capital']) +
+        availableBalance:
+            _jsonDouble(cuenta['saldo_capital']) +
             _jsonDouble(cuenta['saldo_interes']),
         monthlyDeposits: monthlyDeposits == 0
             ? demoProducts.savings.monthlyDeposits
@@ -195,14 +217,21 @@ class BankProducts {
           '002-${_text(cuenta['cod_cuenta_ahorro'], '000000000000000000')}',
         ),
         statements: [
-          AccountStatement('Junio 2026', money(_jsonDouble(cuenta['saldo_capital'])), 'Core'),
+          AccountStatement(
+            'Junio 2026',
+            money(_jsonDouble(cuenta['saldo_capital'])),
+            'Core',
+          ),
           const AccountStatement('Mayo 2026', 'Generado en BD', 'Disponible'),
           const AccountStatement('Abril 2026', 'Generado en BD', 'Disponible'),
         ],
       ),
       credit: CreditProduct(
         name: _text(credito['producto'], demoProducts.credit.name),
-        number: _text(credito['cod_cuenta_credito'], demoProducts.credit.number),
+        number: _text(
+          credito['cod_cuenta_credito'],
+          demoProducts.credit.number,
+        ),
         principal: _jsonDouble(credito['monto_desembolsado']) == 0
             ? demoProducts.credit.principal
             : _jsonDouble(credito['monto_desembolsado']),
@@ -213,7 +242,10 @@ class BankProducts {
             ? demoProducts.credit.nextPayment
             : _jsonDouble(nextInstallment['monto_cuota']),
         dueDate: _formatCoreDate(
-          _text(nextInstallment['fecha_vencimiento'], demoProducts.credit.dueDate),
+          _text(
+            nextInstallment['fecha_vencimiento'],
+            demoProducts.credit.dueDate,
+          ),
         ),
         tea: '${_jsonDouble(credito['tea']).toStringAsFixed(2)}%',
         installments: cuotas.isEmpty
@@ -237,7 +269,7 @@ class BankProducts {
                     _text(item['concepto'], 'Movimiento Core'),
                     _formatCoreDate(_text(item['fecha_operacion'], '')),
                     _jsonDouble(item['monto']),
-                    _text(item['tipo_movimiento'], '').toUpperCase() == 'CRE',
+                    _movementType(item) == 'CRE',
                   ),
                 )
                 .toList(),
@@ -361,7 +393,9 @@ class CreditApplicationData {
 
   double get monthlyPayment {
     final tem = pow(1 + tea, 1 / 12) - 1;
-    return amount * tem * pow(1 + tem, termMonths) /
+    return amount *
+        tem *
+        pow(1 + tem, termMonths) /
         (pow(1 + tem, termMonths) - 1);
   }
 
@@ -438,6 +472,29 @@ class CoreApiClient {
     }
   }
 
+  Future<void> registerCliente({
+    required String document,
+    required String password,
+    required String names,
+    required String lastNames,
+    required String email,
+    required String phone,
+  }) async {
+    final body = jsonEncode({
+      'numero_documento': document,
+      'password': password,
+      'nombres': names,
+      'apellidos': lastNames,
+      'email': email,
+      'telefono': phone,
+    });
+    try {
+      await _postRegister(primaryCoreBaseUrl, body);
+    } catch (_) {
+      await _postRegister(fallbackCoreBaseUrl, body);
+    }
+  }
+
   Future<Map<String, dynamic>> loadCustomerSummary(String document) async {
     try {
       return _getSummary(primaryCoreBaseUrl, document);
@@ -489,7 +546,14 @@ class CoreApiClient {
     return _text(response['access_token'] ?? response['token'], '');
   }
 
-  Future<Map<String, dynamic>> _getSummary(String baseUrl, String document) async {
+  Future<void> _postRegister(String baseUrl, String body) async {
+    await _postJson('$baseUrl/cliente/registro', body);
+  }
+
+  Future<Map<String, dynamic>> _getSummary(
+    String baseUrl,
+    String document,
+  ) async {
     final response = await _getJson('$baseUrl/cliente/demo/$document/resumen');
     return Map<String, dynamic>.from(response as Map);
   }
@@ -589,7 +653,10 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> restoreSecureSession() async {
     final token = await secureStorage.read(key: 'cliente_token');
     final document = await secureStorage.read(key: 'cliente_documento');
-    if (token == null || token.isEmpty || document == null || document.isEmpty) {
+    if (token == null ||
+        token.isEmpty ||
+        document == null ||
+        document.isEmpty) {
       return;
     }
     try {
@@ -624,10 +691,14 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void openRegister() {
-    Navigator.of(
+  Future<void> openRegister() async {
+    final registeredDni = await Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => const RegisterPage()));
+    ).push<String>(MaterialPageRoute(builder: (_) => const RegisterPage()));
+    if (registeredDni != null && registeredDni.isNotEmpty) {
+      emailController.text = registeredDni;
+      passwordController.clear();
+    }
   }
 
   @override
@@ -679,7 +750,8 @@ class _LoginPageState extends State<LoginPage> {
                             validator: (value) {
                               final dni = value?.trim() ?? '';
                               if (dni.isEmpty) return 'Ingrese su DNI';
-                              if (dni.length != 8 || int.tryParse(dni) == null) {
+                              if (dni.length != 8 ||
+                                  int.tryParse(dni) == null) {
                                 return 'Ingrese un DNI valido de 8 digitos';
                               }
                               return null;
@@ -777,24 +849,54 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   final formKey = GlobalKey<FormState>();
   final dniController = TextEditingController();
+  final namesController = TextEditingController();
+  final lastNamesController = TextEditingController();
   final emailController = TextEditingController();
   final phoneController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool loading = false;
 
   @override
   void dispose() {
     dniController.dispose();
+    namesController.dispose();
+    lastNamesController.dispose();
     emailController.dispose();
     phoneController.dispose();
+    passwordController.dispose();
     super.dispose();
   }
 
-  void register() {
+  Future<void> register() async {
     if (!formKey.currentState!.validate()) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Registro demo validado correctamente.')),
-    );
-    Navigator.of(context).pop();
+    setState(() => loading = true);
+    try {
+      await const CoreApiClient().registerCliente(
+        document: dniController.text.trim(),
+        password: passwordController.text.trim(),
+        names: namesController.text.trim(),
+        lastNames: lastNamesController.text.trim(),
+        email: emailController.text.trim(),
+        phone: phoneController.text.trim(),
+      );
+      await secureStorage.deleteAll();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cuenta creada. Ya puedes ingresar.')),
+      );
+      Navigator.of(context).pop(dniController.text.trim());
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo crear la cuenta: $error'),
+          backgroundColor: AppColors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
   }
 
   @override
@@ -825,6 +927,32 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                   const SizedBox(height: 14),
                   AppTextField(
+                    controller: namesController,
+                    label: 'Nombres',
+                    icon: Icons.person_outline,
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Ingrese sus nombres';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  AppTextField(
+                    controller: lastNamesController,
+                    label: 'Apellidos',
+                    icon: Icons.person,
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Ingrese sus apellidos';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  AppTextField(
                     controller: emailController,
                     label: 'Correo',
                     icon: Icons.email_outlined,
@@ -849,11 +977,31 @@ class _RegisterPageState extends State<RegisterPage> {
                       return null;
                     },
                   ),
+                  const SizedBox(height: 14),
+                  AppTextField(
+                    controller: passwordController,
+                    label: 'Contrasena',
+                    icon: Icons.lock_outline,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    validator: (value) {
+                      if ((value ?? '').length < 5) {
+                        return 'La contrasena debe tener minimo 5 caracteres';
+                      }
+                      return null;
+                    },
+                  ),
                   const SizedBox(height: 20),
                   FilledButton.icon(
-                    onPressed: register,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Crear acceso demo'),
+                    onPressed: loading ? null : register,
+                    icon: loading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_circle_outline),
+                    label: const Text('Crear mi cuenta'),
                   ),
                 ],
               ),
@@ -891,7 +1039,7 @@ class _ClientShellState extends State<ClientShell> {
     final pages = [
       DashboardPage(profile: widget.profile, products: widget.products),
       SavingsPage(products: widget.products),
-      CreditsPage(products: widget.products),
+      CreditsPage(profile: widget.profile, products: widget.products),
       PaymentsPage(
         token: widget.token,
         accountNumber: widget.products.savings.number,
@@ -1110,14 +1258,23 @@ class SavingsPage extends StatelessWidget {
 }
 
 class CreditsPage extends StatelessWidget {
-  const CreditsPage({super.key, required this.products});
+  const CreditsPage({super.key, required this.profile, required this.products});
 
+  final UserProfile profile;
   final BankProducts products;
 
   @override
   Widget build(BuildContext context) {
     final credit = products.credit;
     final progress = 1 - (credit.pending / credit.principal);
+    final totalScheduled = credit.installments.fold<double>(
+      0,
+      (sum, installment) => sum + installment.amount,
+    );
+    final estimatedInterest = max(
+      totalScheduled - credit.principal,
+      0,
+    ).toDouble();
 
     return AppPage(
       child: Column(
@@ -1189,6 +1346,9 @@ class CreditsPage extends StatelessWidget {
                   backgroundColor: const Color(0xFFE3EBE6),
                 ),
                 const SizedBox(height: 12),
+                InfoRow('Capital desembolsado', money(credit.principal)),
+                InfoRow('Total cronograma', money(totalScheduled)),
+                InfoRow('Interes estimado', money(estimatedInterest)),
                 InfoRow('Proxima cuota', money(credit.nextPayment)),
                 InfoRow('Fecha de pago', credit.dueDate),
                 InfoRow('TEA referencial', credit.tea),
@@ -1200,7 +1360,7 @@ class CreditsPage extends StatelessWidget {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => const CreditApplicationPage(),
+                  builder: (_) => CreditApplicationPage(profile: profile),
                 ),
               );
             },
@@ -1219,7 +1379,9 @@ class CreditsPage extends StatelessWidget {
 }
 
 class CreditApplicationPage extends StatefulWidget {
-  const CreditApplicationPage({super.key});
+  const CreditApplicationPage({super.key, required this.profile});
+
+  final UserProfile profile;
 
   @override
   State<CreditApplicationPage> createState() => _CreditApplicationPageState();
@@ -1227,12 +1389,12 @@ class CreditApplicationPage extends StatefulWidget {
 
 class _CreditApplicationPageState extends State<CreditApplicationPage> {
   final formKey = GlobalKey<FormState>();
-  final documentController = TextEditingController(text: '40118120');
-  final namesController = TextEditingController(text: 'Anaximandro');
-  final lastNamesController = TextEditingController(text: 'Quispe');
-  final phoneController = TextEditingController(text: '964110201');
-  final businessController = TextEditingController(text: 'Bodega Don Anaxi');
-  final incomeController = TextEditingController(text: '2200');
+  final documentController = TextEditingController();
+  final namesController = TextEditingController();
+  final lastNamesController = TextEditingController();
+  final phoneController = TextEditingController();
+  final businessController = TextEditingController();
+  final incomeController = TextEditingController();
   final amountController = TextEditingController(text: '1000');
   final purposeController = TextEditingController(
     text: 'Capital de trabajo: compra de mercaderia',
@@ -1245,11 +1407,11 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
   bool sending = false;
   CreditApplicationResult? result;
   List<Map<String, dynamic>> pdfCases = const [];
-  int selectedCase = 1;
 
   @override
   void initState() {
     super.initState();
+    applyLoggedCustomer();
     loadPdfCases();
   }
 
@@ -1286,36 +1448,11 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
               ),
               SectionIntro(
                 icon: Icons.store,
-                title: 'Casos del enunciado PDF',
+                title: 'Solicitud para tu negocio',
                 description:
-                    'Selecciona cualquiera de los 30 casos, registra la solicitud y enviala a cartera.',
+                    'Tus datos se cargan desde el Core. Completa las condiciones del credito, revisa la cuota referencial y envia el expediente a cartera.',
                 color: AppColors.blue,
               ),
-              if (pdfCases.isNotEmpty)
-                AppCard(
-                  accent: AppColors.green,
-                  child: DropdownButtonFormField<int>(
-                    initialValue: selectedCase,
-                    decoration: const InputDecoration(
-                      labelText: 'Caso del PDF',
-                      prefixIcon: Icon(Icons.dataset),
-                      border: OutlineInputBorder(),
-                    ),
-                    items: pdfCases
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: _jsonInt(item['caso']),
-                            child: Text(
-                              'Caso ${item['caso']} - ${item['nombres']} ${item['apellidos']}',
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) applyCase(value);
-                    },
-                  ),
-                ),
               AppCard(
                 accent: AppColors.blue,
                 child: Column(
@@ -1364,7 +1501,10 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
                         border: OutlineInputBorder(),
                       ),
                       items: const [
-                        DropdownMenuItem(value: 'Bodega', child: Text('Bodega')),
+                        DropdownMenuItem(
+                          value: 'Bodega',
+                          child: Text('Bodega'),
+                        ),
                         DropdownMenuItem(
                           value: 'Abarrotes',
                           child: Text('Abarrotes'),
@@ -1413,7 +1553,10 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
                           value: 'Peluqueria',
                           child: Text('Peluqueria'),
                         ),
-                        DropdownMenuItem(value: 'Textil', child: Text('Textil')),
+                        DropdownMenuItem(
+                          value: 'Textil',
+                          child: Text('Textil'),
+                        ),
                         DropdownMenuItem(
                           value: 'Transporte',
                           child: Text('Transporte'),
@@ -1641,26 +1784,45 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
       final cases = await const CoreApiClient().loadCases();
       if (!mounted || cases.isEmpty) return;
       setState(() => pdfCases = cases);
-      applyCase(1);
+      applyMatchingCase();
     } catch (_) {
-      // Mantiene el Caso 1 precargado si el Core aun no esta levantado.
+      // Mantiene los datos del cliente autenticado si el Core aun no responde.
     }
   }
 
-  void applyCase(int caseNumber) {
-    final item = pdfCases.firstWhere(
-      (entry) => _jsonInt(entry['caso']) == caseNumber,
+  void applyLoggedCustomer() {
+    final profile = widget.profile;
+    final dni = profile.document.replaceAll(RegExp(r'[^0-9]'), '');
+    documentController.text = dni;
+    namesController.text = profile.firstNames;
+    lastNamesController.text = profile.lastNames;
+    phoneController.text = profile.phone;
+    businessType = _normalizeBusinessType(profile.businessType);
+    businessController.text = profile.businessName;
+    incomeController.text = profile.monthlyIncome > 0
+        ? profile.monthlyIncome.toStringAsFixed(0)
+        : '2500';
+  }
+
+  void applyMatchingCase() {
+    final document = documentController.text.trim();
+    final match = pdfCases.firstWhere(
+      (entry) => _text(entry['numero_documento'], '') == document,
       orElse: () => <String, dynamic>{},
     );
+    if (match.isEmpty) return;
+    applyCaseData(match);
+  }
+
+  void applyCaseData(Map<String, dynamic> item) {
     if (item.isEmpty) return;
     final data = CreditApplicationData.fromCase(item);
     setState(() {
-      selectedCase = caseNumber;
       documentController.text = data.document;
       namesController.text = data.names;
       lastNamesController.text = data.lastNames;
       phoneController.text = data.phone;
-      businessType = data.businessType.isEmpty ? 'Bodega' : data.businessType;
+      businessType = _normalizeBusinessType(data.businessType);
       businessController.text = data.businessName;
       incomeController.text = data.monthlyIncome.toStringAsFixed(0);
       amountController.text = data.amount.toStringAsFixed(0);
@@ -1681,6 +1843,28 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
     final number = double.tryParse((value ?? '').trim());
     if (number == null || number <= 0) return 'Ingrese un monto valido';
     return null;
+  }
+
+  String _normalizeBusinessType(String value) {
+    const allowed = {
+      'Bodega',
+      'Abarrotes',
+      'Agropecuario',
+      'Avicola',
+      'Calzado',
+      'Carpinteria',
+      'Comercio',
+      'Farmacia',
+      'Restaurante',
+      'Ferreteria',
+      'Mecanica',
+      'Panaderia',
+      'Peluqueria',
+      'Textil',
+      'Transporte',
+    };
+    final normalized = _titleCase(value);
+    return allowed.contains(normalized) ? normalized : 'Bodega';
   }
 }
 
@@ -2859,6 +3043,11 @@ List<Map<String, dynamic>> _asListOfMaps(dynamic value) {
 String _text(dynamic value, String fallback) {
   final text = value?.toString().trim() ?? '';
   return text.isEmpty ? fallback : text;
+}
+
+String _movementType(Map<String, dynamic> item) {
+  final type = _text(item['tipo'], _text(item['tipo_movimiento'], ''));
+  return type.toUpperCase();
 }
 
 String _titleCase(String value) {
